@@ -5,6 +5,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "procinfo.h"
 
 uint64
 sys_exit(void)
@@ -90,4 +91,15 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64 sys_procinfo(void) {
+    int pid;
+    uint64 info_addr;
+
+    argint(0, &pid); // Lấy pid từ tham số đầu tiên
+    argaddr(1, &info_addr); // Lấy địa chỉ struct procinfo từ
+
+    // Gọi hàm thám tử ở proc.c đi làm việc
+    return get_procinfo(pid, info_addr);
 }
