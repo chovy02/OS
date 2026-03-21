@@ -312,8 +312,6 @@ fork(void)
 
   pid = np->pid;
 
-  np->trace_mask = p->trace_mask;
-
   release(&np->lock);
 
   acquire(&wait_lock);

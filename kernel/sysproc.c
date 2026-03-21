@@ -91,17 +91,3 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
-
-uint64
-sys_trace(void)
-{
-  int mask;
-  
-  // Lấy đối số nguyên (mask) đầu tiên được truyền vào từ user space
-  argint(0, &mask);
-    
-  // Lưu mask vào tiến trình hiện tại
-  myproc()->trace_mask = mask;
-  
-  return 0;
-}
