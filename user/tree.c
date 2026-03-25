@@ -20,7 +20,11 @@ void tree(char *path, int depth){
         return;
     }
     if (depth == 0) {
-        printf("%s/\n", path); 
+        if (strcmp(path, "/") == 0) {
+            printf("/\n");
+        } else {
+            printf("%s/\n", path); 
+        }
     }
     switch (st.type)
     {
