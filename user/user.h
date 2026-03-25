@@ -1,5 +1,5 @@
 struct stat;
-struct procinfo; // [cite: 199]
+struct procinfo;
 
 // system calls
 int fork(void);
