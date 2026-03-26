@@ -1,0 +1,341 @@
+From a1d11944417c02e8849a35590734e417913c03aa Mon Sep 17 00:00:00 2001
+From: thanhan0404 <thanhan0404@gmail.com>
+Date: Sat, 21 Mar 2026 18:52:53 +0700
+Subject: [PATCH 1/3] bai tracing
+
+---
+ Makefile         |  1 +
+ kernel/proc.c    |  2 ++
+ kernel/proc.h    |  1 +
+ kernel/syscall.c | 34 +++++++++++++++++++++++++++++++++-
+ kernel/syscall.h |  2 +-
+ kernel/sysproc.c | 14 ++++++++++++++
+ user/user.h      |  1 +
+ user/usys.pl     |  1 +
+ 8 files changed, 54 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 2c8a9e2..2e2e423 100644
+--- a/Makefile
++++ b/Makefile
+@@ -194,6 +194,7 @@ UPROGS=\
+ 	$U/_grind\
+ 	$U/_wc\
+ 	$U/_zombie\
++	$U/_trace\
+ 	$U/_procinfotest\
+ 
+ 
+diff --git a/kernel/proc.c b/kernel/proc.c
+index 310c6a5..9171df2 100644
+--- a/kernel/proc.c
++++ b/kernel/proc.c
+@@ -313,6 +313,8 @@ fork(void)
+ 
+   pid = np->pid;
+ 
++  np->trace_mask = p->trace_mask;
++
+   release(&np->lock);
+ 
+   acquire(&wait_lock);
+diff --git a/kernel/proc.h b/kernel/proc.h
+index d021857..07725e3 100644
+--- a/kernel/proc.h
++++ b/kernel/proc.h
+@@ -104,4 +104,5 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++  int trace_mask;
+ };
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index bfa5251..b31899c 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -101,6 +101,7 @@ extern uint64 sys_unlink(void);
+ extern uint64 sys_link(void);
+ extern uint64 sys_mkdir(void);
+ extern uint64 sys_close(void);
++extern uint64 sys_trace(void);
+ extern uint64 sys_procinfo(void);
+ 
+ // An array mapping syscall numbers from syscall.h
+@@ -127,9 +128,35 @@ static uint64 (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_trace]   sys_trace,
+ [SYS_procinfo] sys_procinfo,
+ };
+ 
++static char *syscall_names[] = {
++  [SYS_fork]    "fork",
++  [SYS_exit]    "exit",
++  [SYS_wait]    "wait",
++  [SYS_pipe]    "pipe",
++  [SYS_read]    "read",
++  [SYS_kill]    "kill",
++  [SYS_exec]    "exec",
++  [SYS_fstat]   "fstat",
++  [SYS_chdir]   "chdir",
++  [SYS_dup]     "dup",
++  [SYS_getpid]  "getpid",
++  [SYS_sbrk]    "sbrk",
++  [SYS_sleep]   "sleep",
++  [SYS_uptime]  "uptime",
++  [SYS_open]    "open",
++  [SYS_write]   "write",
++  [SYS_mknod]   "mknod",
++  [SYS_unlink]  "unlink",
++  [SYS_link]    "link",
++  [SYS_mkdir]   "mkdir",
++  [SYS_close]   "close",
++  [SYS_trace]   "trace",
++};
++
+ void
+ syscall(void)
+ {
+@@ -138,9 +165,14 @@ syscall(void)
+ 
+   num = p->trapframe->a7;
+   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
++    // Thực thi system call và lưu kết quả trả về vào a0
++    p->trapframe->a0 = syscalls[num]();
+     // Use num to lookup the system call function for num, call it,
+     // and store its return value in p->trapframe->a0
+-    p->trapframe->a0 = syscalls[num]();
++    // Kiểm tra xem system call này có nằm trong mask đang được theo dõi không
++    if((p->trace_mask) & (1 << num)) {
++      printf("%d: syscall %s -> %d\n", p->pid, syscall_names[num], (int)p->trapframe->a0);
++    }
+   } else {
+     printf("%d %s: unknown sys call %d\n",
+             p->pid, p->name, num);
+diff --git a/kernel/syscall.h b/kernel/syscall.h
+index dc9a9aa..4bafbb1 100644
+--- a/kernel/syscall.h
++++ b/kernel/syscall.h
+@@ -20,5 +20,5 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
+-
++#define SYS_trace  22
+ #define SYS_procinfo 23
+\ No newline at end of file
+diff --git a/kernel/sysproc.c b/kernel/sysproc.c
+index ee3a27e..67d9e10 100644
+--- a/kernel/sysproc.c
++++ b/kernel/sysproc.c
+@@ -93,6 +93,20 @@ sys_uptime(void)
+   return xticks;
+ }
+ 
++uint64
++sys_trace(void)
++{
++  int mask;
++  
++  // Lấy đối số nguyên (mask) đầu tiên được truyền vào từ user space
++  argint(0, &mask);
++    
++  // Lưu mask vào tiến trình hiện tại
++  myproc()->trace_mask = mask;
++  
++  return 0;
++}
++
+ uint64 sys_procinfo(void) {
+     int pid;
+     uint64 info_addr;
+diff --git a/user/user.h b/user/user.h
+index ab6aea1..14fd11a 100644
+--- a/user/user.h
++++ b/user/user.h
+@@ -23,6 +23,7 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++int trace(int);
+ int procinfo(int, struct procinfo*);
+ 
+ // ulib.c
+diff --git a/user/usys.pl b/user/usys.pl
+index d70c3fe..36087ff 100755
+--- a/user/usys.pl
++++ b/user/usys.pl
+@@ -36,4 +36,5 @@ entry("getpid");
+ entry("sbrk");
+ entry("sleep");
+ entry("uptime");
++entry("trace");
+ entry("procinfo");
+-- 
+2.43.0
+
+
+From bf4931d1ca64ccff052f16d8c31823d5270e28a8 Mon Sep 17 00:00:00 2001
+From: chovy02 <luonggiabao0202@gmail.com>
+Date: Thu, 26 Mar 2026 00:29:31 +0700
+Subject: [PATCH 2/3] Add TC
+
+---
+ user/procinfotest.c | 87 ++++++++++++++++++++++++++++++++++++++++-----
+ user/user.h         |  2 +-
+ 2 files changed, 80 insertions(+), 9 deletions(-)
+
+diff --git a/user/procinfotest.c b/user/procinfotest.c
+index 62143c3..165a59a 100644
+--- a/user/procinfotest.c
++++ b/user/procinfotest.c
+@@ -3,15 +3,86 @@
+ #include "user/user.h"
+ #include "kernel/procinfo.h"
+ 
+-int main() {
+-    struct procinfo info; // [cite: 199]
+-    if(procinfo(getpid(), &info) == 0){ // [cite: 200]
+-        printf("Process: %s\n", info.name); // [cite: 201]
+-        printf("PID: %d, PPID: %d\n", info.pid, info.ppid); // [cite: 202]
+-        printf("State: %d\n", info.state); // (Sửa %s thành %d vì state là số nguyên) [cite: 203]
+-        printf("Memory: %ld bytes\n", info.sz); // [cite: 204]
++void print_info(struct procinfo *info) {
++    printf("Process: %s\n", info->name); 
++    printf("PID: %d, PPID: %d\n", info->pid, info->ppid); 
++    printf("State: %d\n", info->state); 
++    printf("Memory: %ld bytes\n", info->sz); 
++}
++
++int main(int argc, char *argv[]) {
++    struct procinfo info;
++    int ret;
++
++    // Test Case 1
++    printf("[Test 1] Extract information of current process (PID %d)\n", getpid());
++    ret = procinfo(getpid(), &info);
++    if (ret == 0) {
++        printf("  [PASS] Success!\n");
++        print_info(&info);
++    } else {
++        printf("  [FAIL]\n");
++    }
++    printf("\n");
++
++    // TEST 2: PID does not exist (Edge Case)
++    printf("[Test 2] PID does not exit (PID 9999)\n");
++    ret = procinfo(9999, &info);
++    if (ret < 0) {
++        printf("  [PASS] Error (Return %d).\n", ret);
++    } else {
++        printf("  [FAIL]\n");
++    }
++    printf("\n");
++
++    // TEST 3: Use NULL pointer for info storage
++    printf("[Test 3] Use NULL pointer for info storage\n");
++    // 0 represents NULL pointer in User Space.
++    ret = procinfo(getpid(), (struct procinfo *)0); 
++    if (ret < 0) {
++        printf("  [PASS] Copyout() refuses to write in NULL (Return %d).\n", ret);
+     } else {
+-        printf("Failed to get procinfo\n");
++        printf("  [FAIL]\n");
++    }
++    printf("\n");
++
++    // TEST 4: Get infomation from parent process
++    printf("[Test 4] Get infomation from parent process\n");
++    ret = procinfo(info.ppid, &info); // Use ppid from Test Case 1
++    if (ret == 0) {
++        printf("  [PASS] Success!\n");
++        print_info(&info);
++    } else {
++        printf("  [FAIL]\n");
++    }
++    printf("\n");
++
++    printf("[Test 5] Get information from process with PID = 1 (init)\n");
++    ret = procinfo(1, &info);
++    if (ret == 0) {
++        printf("  [PASS] Success\n");
++        print_info(&info);
++    } else {
++        printf("  [FAIL]!\n");
++    }
++    printf("\n");
++
++    // TEST 6: Get information from child process
++    printf("[Test 6] Using fork to create a child process\n");
++    int child_pid = fork();
++    if (child_pid == 0) {
++        sleep(10);
++        exit(0);
++    } else if (child_pid > 0) {
++        ret = procinfo(child_pid, &info);
++        if (ret == 0) {
++            printf("  [PASS] Success\n");
++            print_info(&info);
++        } else {
++            printf("  [FAIL]\n");
++        }
++        wait(0); 
+     }
++    printf("\n");
+     exit(0);
+ }
+\ No newline at end of file
+diff --git a/user/user.h b/user/user.h
+index 14fd11a..1ffd0c1 100644
+--- a/user/user.h
++++ b/user/user.h
+@@ -1,5 +1,5 @@
+ struct stat;
+-struct procinfo; // [cite: 199]
++struct procinfo;
+ 
+ // system calls
+ int fork(void);
+-- 
+2.43.0
+
+
+From e20ae16dbc916169e9c3651bce1a3c42aae289f2 Mon Sep 17 00:00:00 2001
+From: chovy02 <luonggiabao0202@gmail.com>
+Date: Thu, 26 Mar 2026 12:18:12 +0700
+Subject: [PATCH 3/3] Doi state tu so thanh ten
+
+---
+ user/procinfotest.c | 12 +++++++++++-
+ 1 file changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/user/procinfotest.c b/user/procinfotest.c
+index 165a59a..439d295 100644
+--- a/user/procinfotest.c
++++ b/user/procinfotest.c
+@@ -3,10 +3,20 @@
+ #include "user/user.h"
+ #include "kernel/procinfo.h"
+ 
++const char *state_names[] = {
++    "UNUSED", 
++    "USED", 
++    "SLEEPING", 
++    "RUNNABLE", 
++    "RUNNING", 
++    "ZOMBIE"
++};
++
+ void print_info(struct procinfo *info) {
++    const char *state_str = (info->state >= 0 && info->state <= 5) ? state_names[info->state] : "UNKNOWN";
+     printf("Process: %s\n", info->name); 
+     printf("PID: %d, PPID: %d\n", info->pid, info->ppid); 
+-    printf("State: %d\n", info->state); 
++    printf("State: %s\n", state_str); 
+     printf("Memory: %ld bytes\n", info->sz); 
+ }
+ 
+-- 
+2.43.0
+
