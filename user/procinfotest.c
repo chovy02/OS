@@ -3,10 +3,20 @@
 #include "user/user.h"
 #include "kernel/procinfo.h"
 
+const char *state_names[] = {
+    "UNUSED", 
+    "USED", 
+    "SLEEPING", 
+    "RUNNABLE", 
+    "RUNNING", 
+    "ZOMBIE"
+};
+
 void print_info(struct procinfo *info) {
+    const char *state_str = (info->state >= 0 && info->state <= 5) ? state_names[info->state] : "UNKNOWN";
     printf("Process: %s\n", info->name); 
     printf("PID: %d, PPID: %d\n", info->pid, info->ppid); 
-    printf("State: %d\n", info->state); 
+    printf("State: %s\n", state_str); 
     printf("Memory: %ld bytes\n", info->sz); 
 }
 
