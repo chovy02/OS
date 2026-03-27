@@ -1,0 +1,712 @@
+From c4b2df3d2348de9c0c2db3a3c8264d61f67d5c0a Mon Sep 17 00:00:00 2001
+From: chovy02 <luonggiabao0202@gmail.com>
+Date: Tue, 10 Mar 2026 21:00:22 +0700
+Subject: [PATCH 1/7] =?UTF-8?q?Kh=E1=BB=9Fi=20t=E1=BA=A1o=20file=20xargs.c?=
+ =?UTF-8?q?=20cho=20b=C3=A0i=20t=E1=BA=ADp=201?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ user/xargs.c | 0
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ create mode 100644 user/xargs.c
+
+diff --git a/user/xargs.c b/user/xargs.c
+new file mode 100644
+index 0000000..e69de29
+-- 
+2.43.0
+
+
+From 7d1d78487ecce7c221676b76b44599922038dd21 Mon Sep 17 00:00:00 2001
+From: thanhan0404 <thanhan0404@gmail.com>
+Date: Tue, 10 Mar 2026 22:25:18 +0700
+Subject: [PATCH 2/7] test
+
+---
+ Makefile     |  2 +-
+ user/xargs.c | 39 +++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 40 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 74e454f..db18b8d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -194,7 +194,7 @@ UPROGS=\
+ 	$U/_grind\
+ 	$U/_wc\
+ 	$U/_zombie\
+-
++	$U/_xargs\
+ 
+ 
+ 
+diff --git a/user/xargs.c b/user/xargs.c
+index e69de29..a972ce2 100644
+--- a/user/xargs.c
++++ b/user/xargs.c
+@@ -0,0 +1,39 @@
++#include "kernel/types.h"
++#include "kernel/stat.h"
++#include "user/user.h"
++#include "kernel/param.h" // Chứa MAXARG 
++
++int main(int argc, char *argv[]) {
++    // Kiểm tra tham số đầu vào
++    if (argc < 2) {
++        fprintf(2, "Usage: xargs command...\n");
++        exit(1);
++    }
++
++    char *xargs_argv[MAXARG];
++    // TODO 1: Copy các lệnh ban đầu (từ argv[1] trở đi) vào mảng xargs_argv
++
++    char buf;
++    // Lặp đọc từng ký tự từ stdin 
++    while (read(0, &buf, 1) > 0) {
++        // TODO 2: Tích lũy các ký tự vào một mảng bộ đệm tạm thời (buffer)
++        
++        // Khi gặp khoảng trắng hoặc \n thì chốt một tham số
++        if (buf == '\n') {
++            // TODO 3: Trỏ phần tử tiếp theo của xargs_argv vào buffer vừa tạo
++            
++            // TODO 4: Dùng fork() để tạo process mới 
++            int pid = fork();
++            if (pid == 0) {
++                // Tiến trình con: gọi exec() 
++                // exec(xargs_argv[0], xargs_argv);
++            } else {
++                // Tiến trình cha: gọi wait() 
++                wait(0);
++            }
++            
++            // TODO 5: Reset lại mảng tham số chuẩn bị cho dòng tiếp theo
++        }
++    }
++    exit(0);
++}
+\ No newline at end of file
+-- 
+2.43.0
+
+
+From 6a19469e050a9d22a5bbfc3746a8e52e0a42b71e Mon Sep 17 00:00:00 2001
+From: thanhan0404 <thanhan0404@gmail.com>
+Date: Wed, 11 Mar 2026 00:17:29 +0700
+Subject: [PATCH 3/7] tree
+
+---
+ user/tree.c | 74 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 74 insertions(+)
+ create mode 100644 user/tree.c
+
+diff --git a/user/tree.c b/user/tree.c
+new file mode 100644
+index 0000000..c07e235
+--- /dev/null
++++ b/user/tree.c
+@@ -0,0 +1,74 @@
++#include "kernel/types.h"
++#include "kernel/stat.h"
++#include "user/user.h"
++#include "kernel/fs.h"
++#include "kernel/fcntl.h"
++
++void tree(char *path, int depth){
++    char buf[512], *p;
++    int fd;
++    struct dirent de;
++    struct stat st;
++    
++    if((fd = open(path, O_RDONLY)) < 0){
++        fprintf(2, "tree: cannot open %s\n", path);
++        return;
++    }
++    if(fstat(fd, &st) < 0){
++        fprintf(2, "tree: cannot stat %s\n", path);
++        close(fd);
++        return;
++    }
++    if (depth == 0) {
++        printf("%s/\n", path); 
++    }
++    switch (st.type)
++    {
++    case T_DEVICE:
++    case T_FILE:
++        printf("%s\n", path);
++        break;
++    case T_DIR:
++        if(strlen(path) + 1 + DIRSIZ + 1 > sizeof buf){
++            printf("tree: path too long\n");
++            break;
++        }
++        strcpy(buf,path);
++        p = buf+strlen(buf);
++        *p++ = '/';
++        while(read(fd, &de, sizeof(de)) == sizeof(de)){
++            if(de.inum == 0){
++                continue;
++            }
++            if(strcmp(de.name, ".") == 0 || strcmp(de.name, "..") == 0){
++                continue;
++            }
++            memmove(p, de.name, DIRSIZ);
++            p[DIRSIZ] = 0;
++            if(stat(buf, &st) < 0){
++                printf("tree: cannot stat %s\n", buf);
++                continue;
++            }
++            for(int i = 0; i < depth + 1; i++){
++                printf("  ");
++            }
++            if(st.type == T_DIR){
++                printf("%s/\n", de.name);
++                tree(buf, depth + 1);
++            }
++            else{
++                printf("%s\n", de.name);
++            }
++        }
++    }
++    close(fd);
++}
++int main(int argc, char *argv[]){
++    if(argc < 2){
++        tree(".", 0);
++    }
++    else{
++        tree(argv[1], 0);
++    }
++    exit(0);
++}
+\ No newline at end of file
+-- 
+2.43.0
+
+
+From db0a7cb8e4b5ceb4bc17b521a1645507675a00ce Mon Sep 17 00:00:00 2001
+From: chovy02 <luonggiabao0202@gmail.com>
+Date: Wed, 11 Mar 2026 00:56:06 +0700
+Subject: [PATCH 4/7] bai 1
+
+---
+ user/xargs.c | 59 ++++++++++++++++++++++++++++++++++++++++------------
+ 1 file changed, 46 insertions(+), 13 deletions(-)
+
+diff --git a/user/xargs.c b/user/xargs.c
+index a972ce2..106d966 100644
+--- a/user/xargs.c
++++ b/user/xargs.c
+@@ -12,27 +12,60 @@ int main(int argc, char *argv[]) {
+ 
+     char *xargs_argv[MAXARG];
+     // TODO 1: Copy các lệnh ban đầu (từ argv[1] trở đi) vào mảng xargs_argv
++    
++    int base_argc = 0;
++    for (int i = 1; i < argc; i++) {
++        xargs_argv[base_argc] = argv[i];
++        base_argc++;
++    }
++    
++    int current_argc = base_argc; // Số lượng tham số hiện tại trong xargs_argv
++
++    char param_buf[512];
++    int buf_idx = 0;
++
++    xargs_argv[current_argc] = &param_buf[buf_idx]; // Trỏ phần tử tiếp theo của xargs_argv vào buffer để nhận tham số từ stdin
+ 
+     char buf;
+     // Lặp đọc từng ký tự từ stdin 
+     while (read(0, &buf, 1) > 0) {
+-        // TODO 2: Tích lũy các ký tự vào một mảng bộ đệm tạm thời (buffer)
+         
+         // Khi gặp khoảng trắng hoặc \n thì chốt một tham số
+-        if (buf == '\n') {
+-            // TODO 3: Trỏ phần tử tiếp theo của xargs_argv vào buffer vừa tạo
++        if (buf == ' ' || buf == '\n') {
++            param_buf[buf_idx] = '\0'; // Kết thúc chuỗi tham số
++
++            current_argc++;
++            buf_idx++;
++
++            if (buf == '\n') {
++                xargs_argv[current_argc] = 0; // Kết thúc mảng tham số với NULL
+             
+-            // TODO 4: Dùng fork() để tạo process mới 
+-            int pid = fork();
+-            if (pid == 0) {
+-                // Tiến trình con: gọi exec() 
+-                // exec(xargs_argv[0], xargs_argv);
+-            } else {
+-                // Tiến trình cha: gọi wait() 
+-                wait(0);
++                // TODO 4: Dùng fork() để tạo process mới 
++                int pid = fork();
++                if (pid == 0) {
++                    // Tiến trình con: gọi exec() 
++                    exec(xargs_argv[0], xargs_argv);
++                    fprintf(2, "xargs: exec failed\n");
++                    exit(1);
++                }
++                else {
++                    // Tien trình cha: gọi wait()
++                    wait(0);
++                }
++                
++                // TODO 5: Reset lại mảng tham số chuẩn bị cho dòng tiếp theo
++                current_argc = base_argc; // Reset số lượng tham số về ban đầu
++                buf_idx = 0; // Reset buffer index để nhận tham số mới
++                xargs_argv[current_argc] = &param_buf[buf_idx]; // Trỏ lại phần tử tiếp theo của xargs_argv vào buffer
+             }
+-            
+-            // TODO 5: Reset lại mảng tham số chuẩn bị cho dòng tiếp theo
++            else {
++                // Nếu là khoảng trắng, chỉ cần kết thúc tham số hiện tại và tiếp tục nhận tham số mới
++                xargs_argv[current_argc] = &param_buf[buf_idx]; // Trỏ phần tử tiếp theo của xargs_argv vào buffer để nhận tham số mới
++            }
++        }
++        else {
++            param_buf[buf_idx] = buf; // Thêm ký tự vào buffer
++            buf_idx++;
+         }
+     }
+     exit(0);
+-- 
+2.43.0
+
+
+From 70639f15b9176daccda79fcc07e0a7654197ba9c Mon Sep 17 00:00:00 2001
+From: thanhan0404 <thanhan0404@gmail.com>
+Date: Sat, 21 Mar 2026 18:37:05 +0700
+Subject: [PATCH 5/7] bai tracing
+
+---
+ Makefile         |  3 ++-
+ kernel/proc.c    |  2 ++
+ kernel/proc.h    |  1 +
+ kernel/syscall.c | 30 ++++++++++++++++++++++++++++++
+ kernel/syscall.h |  1 +
+ kernel/sysproc.c | 14 ++++++++++++++
+ user/trace.c     | 30 ++++++++++++++++++++++++++++++
+ user/user.h      |  1 +
+ user/usys.pl     |  1 +
+ 9 files changed, 82 insertions(+), 1 deletion(-)
+ create mode 100644 user/trace.c
+
+diff --git a/Makefile b/Makefile
+index db18b8d..2bc6aeb 100644
+--- a/Makefile
++++ b/Makefile
+@@ -194,7 +194,8 @@ UPROGS=\
+ 	$U/_grind\
+ 	$U/_wc\
+ 	$U/_zombie\
+-	$U/_xargs\
++	$U/_tree\
++	$U/_trace\
+ 
+ 
+ 
+diff --git a/kernel/proc.c b/kernel/proc.c
+index 130d9ce..6effb02 100644
+--- a/kernel/proc.c
++++ b/kernel/proc.c
+@@ -312,6 +312,8 @@ fork(void)
+ 
+   pid = np->pid;
+ 
++  np->trace_mask = p->trace_mask;
++
+   release(&np->lock);
+ 
+   acquire(&wait_lock);
+diff --git a/kernel/proc.h b/kernel/proc.h
+index d021857..07725e3 100644
+--- a/kernel/proc.h
++++ b/kernel/proc.h
+@@ -104,4 +104,5 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++  int trace_mask;
+ };
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index ed65409..b3fe39a 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -101,6 +101,7 @@ extern uint64 sys_unlink(void);
+ extern uint64 sys_link(void);
+ extern uint64 sys_mkdir(void);
+ extern uint64 sys_close(void);
++extern uint64 sys_trace(void);
+ 
+ // An array mapping syscall numbers from syscall.h
+ // to the function that handles the system call.
+@@ -126,6 +127,32 @@ static uint64 (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_trace]   sys_trace,
++};
++
++static char *syscall_names[] = {
++  [SYS_fork]    "fork",
++  [SYS_exit]    "exit",
++  [SYS_wait]    "wait",
++  [SYS_pipe]    "pipe",
++  [SYS_read]    "read",
++  [SYS_kill]    "kill",
++  [SYS_exec]    "exec",
++  [SYS_fstat]   "fstat",
++  [SYS_chdir]   "chdir",
++  [SYS_dup]     "dup",
++  [SYS_getpid]  "getpid",
++  [SYS_sbrk]    "sbrk",
++  [SYS_sleep]   "sleep",
++  [SYS_uptime]  "uptime",
++  [SYS_open]    "open",
++  [SYS_write]   "write",
++  [SYS_mknod]   "mknod",
++  [SYS_unlink]  "unlink",
++  [SYS_link]    "link",
++  [SYS_mkdir]   "mkdir",
++  [SYS_close]   "close",
++  [SYS_trace]   "trace",
+ };
+ 
+ void
+@@ -139,6 +166,9 @@ syscall(void)
+     // Use num to lookup the system call function for num, call it,
+     // and store its return value in p->trapframe->a0
+     p->trapframe->a0 = syscalls[num]();
++    if((p->trace_mask) & (1 << num)) {
++      printf("%d: syscall %s -> %d\n", p->pid, syscall_names[num], (int)p->trapframe->a0);
++    }
+   } else {
+     printf("%d %s: unknown sys call %d\n",
+             p->pid, p->name, num);
+diff --git a/kernel/syscall.h b/kernel/syscall.h
+index bc5f356..cc112b9 100644
+--- a/kernel/syscall.h
++++ b/kernel/syscall.h
+@@ -20,3 +20,4 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
++#define SYS_trace  22
+diff --git a/kernel/sysproc.c b/kernel/sysproc.c
+index 3b4d5bd..8fff6ee 100644
+--- a/kernel/sysproc.c
++++ b/kernel/sysproc.c
+@@ -91,3 +91,17 @@ sys_uptime(void)
+   release(&tickslock);
+   return xticks;
+ }
++
++uint64
++sys_trace(void)
++{
++  int mask;
++  
++  // Lấy đối số nguyên (mask) đầu tiên được truyền vào từ user space
++  argint(0, &mask);
++    
++  // Lưu mask vào tiến trình hiện tại
++  myproc()->trace_mask = mask;
++  
++  return 0;
++}
+\ No newline at end of file
+diff --git a/user/trace.c b/user/trace.c
+new file mode 100644
+index 0000000..f2db410
+--- /dev/null
++++ b/user/trace.c
+@@ -0,0 +1,30 @@
++#include "kernel/param.h"
++#include "kernel/types.h"
++#include "kernel/stat.h"
++#include "user/user.h"
++
++int
++main(int argc, char *argv[])
++{
++  int i;
++  char *nargv[MAXARG];
++
++  if(argc < 3 || (argv[1][0] < '0' || argv[1][0] > '9')){
++    fprintf(2, "Usage: %s mask command\n", argv[0]);
++    exit(1);
++  }
++
++  if (trace(atoi(argv[1])) < 0) {
++    fprintf(2, "%s: trace failed\n", argv[0]);
++    exit(1);
++  }
++
++  for(i = 2; i < argc && i < MAXARG; i++){
++    nargv[i-2] = argv[i];
++  }
++  nargv[i-2] = 0;
++
++  exec(nargv[0], nargv);
++  printf("exec %s failed\n", nargv[0]);
++  exit(1);
++}
+\ No newline at end of file
+diff --git a/user/user.h b/user/user.h
+index f16fe27..bd3b7f0 100644
+--- a/user/user.h
++++ b/user/user.h
+@@ -22,6 +22,7 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++int trace(int);
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff --git a/user/usys.pl b/user/usys.pl
+index 01e426e..9c97b05 100755
+--- a/user/usys.pl
++++ b/user/usys.pl
+@@ -36,3 +36,4 @@ entry("getpid");
+ entry("sbrk");
+ entry("sleep");
+ entry("uptime");
++entry("trace");
+-- 
+2.43.0
+
+
+From c1d32ff0bf8caae5dff405b86fbe9ef381389e31 Mon Sep 17 00:00:00 2001
+From: thanhan0404 <thanhan0404@gmail.com>
+Date: Sat, 21 Mar 2026 18:38:58 +0700
+Subject: [PATCH 6/7] Revert "bai tracing"
+
+This reverts commit 70639f15b9176daccda79fcc07e0a7654197ba9c.
+---
+ Makefile         |  3 +--
+ kernel/proc.c    |  2 --
+ kernel/proc.h    |  1 -
+ kernel/syscall.c | 30 ------------------------------
+ kernel/syscall.h |  1 -
+ kernel/sysproc.c | 14 --------------
+ user/trace.c     | 30 ------------------------------
+ user/user.h      |  1 -
+ user/usys.pl     |  1 -
+ 9 files changed, 1 insertion(+), 82 deletions(-)
+ delete mode 100644 user/trace.c
+
+diff --git a/Makefile b/Makefile
+index 2bc6aeb..db18b8d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -194,8 +194,7 @@ UPROGS=\
+ 	$U/_grind\
+ 	$U/_wc\
+ 	$U/_zombie\
+-	$U/_tree\
+-	$U/_trace\
++	$U/_xargs\
+ 
+ 
+ 
+diff --git a/kernel/proc.c b/kernel/proc.c
+index 6effb02..130d9ce 100644
+--- a/kernel/proc.c
++++ b/kernel/proc.c
+@@ -312,8 +312,6 @@ fork(void)
+ 
+   pid = np->pid;
+ 
+-  np->trace_mask = p->trace_mask;
+-
+   release(&np->lock);
+ 
+   acquire(&wait_lock);
+diff --git a/kernel/proc.h b/kernel/proc.h
+index 07725e3..d021857 100644
+--- a/kernel/proc.h
++++ b/kernel/proc.h
+@@ -104,5 +104,4 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
+-  int trace_mask;
+ };
+diff --git a/kernel/syscall.c b/kernel/syscall.c
+index b3fe39a..ed65409 100644
+--- a/kernel/syscall.c
++++ b/kernel/syscall.c
+@@ -101,7 +101,6 @@ extern uint64 sys_unlink(void);
+ extern uint64 sys_link(void);
+ extern uint64 sys_mkdir(void);
+ extern uint64 sys_close(void);
+-extern uint64 sys_trace(void);
+ 
+ // An array mapping syscall numbers from syscall.h
+ // to the function that handles the system call.
+@@ -127,32 +126,6 @@ static uint64 (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
+-[SYS_trace]   sys_trace,
+-};
+-
+-static char *syscall_names[] = {
+-  [SYS_fork]    "fork",
+-  [SYS_exit]    "exit",
+-  [SYS_wait]    "wait",
+-  [SYS_pipe]    "pipe",
+-  [SYS_read]    "read",
+-  [SYS_kill]    "kill",
+-  [SYS_exec]    "exec",
+-  [SYS_fstat]   "fstat",
+-  [SYS_chdir]   "chdir",
+-  [SYS_dup]     "dup",
+-  [SYS_getpid]  "getpid",
+-  [SYS_sbrk]    "sbrk",
+-  [SYS_sleep]   "sleep",
+-  [SYS_uptime]  "uptime",
+-  [SYS_open]    "open",
+-  [SYS_write]   "write",
+-  [SYS_mknod]   "mknod",
+-  [SYS_unlink]  "unlink",
+-  [SYS_link]    "link",
+-  [SYS_mkdir]   "mkdir",
+-  [SYS_close]   "close",
+-  [SYS_trace]   "trace",
+ };
+ 
+ void
+@@ -166,9 +139,6 @@ syscall(void)
+     // Use num to lookup the system call function for num, call it,
+     // and store its return value in p->trapframe->a0
+     p->trapframe->a0 = syscalls[num]();
+-    if((p->trace_mask) & (1 << num)) {
+-      printf("%d: syscall %s -> %d\n", p->pid, syscall_names[num], (int)p->trapframe->a0);
+-    }
+   } else {
+     printf("%d %s: unknown sys call %d\n",
+             p->pid, p->name, num);
+diff --git a/kernel/syscall.h b/kernel/syscall.h
+index cc112b9..bc5f356 100644
+--- a/kernel/syscall.h
++++ b/kernel/syscall.h
+@@ -20,4 +20,3 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
+-#define SYS_trace  22
+diff --git a/kernel/sysproc.c b/kernel/sysproc.c
+index 8fff6ee..3b4d5bd 100644
+--- a/kernel/sysproc.c
++++ b/kernel/sysproc.c
+@@ -91,17 +91,3 @@ sys_uptime(void)
+   release(&tickslock);
+   return xticks;
+ }
+-
+-uint64
+-sys_trace(void)
+-{
+-  int mask;
+-  
+-  // Lấy đối số nguyên (mask) đầu tiên được truyền vào từ user space
+-  argint(0, &mask);
+-    
+-  // Lưu mask vào tiến trình hiện tại
+-  myproc()->trace_mask = mask;
+-  
+-  return 0;
+-}
+\ No newline at end of file
+diff --git a/user/trace.c b/user/trace.c
+deleted file mode 100644
+index f2db410..0000000
+--- a/user/trace.c
++++ /dev/null
+@@ -1,30 +0,0 @@
+-#include "kernel/param.h"
+-#include "kernel/types.h"
+-#include "kernel/stat.h"
+-#include "user/user.h"
+-
+-int
+-main(int argc, char *argv[])
+-{
+-  int i;
+-  char *nargv[MAXARG];
+-
+-  if(argc < 3 || (argv[1][0] < '0' || argv[1][0] > '9')){
+-    fprintf(2, "Usage: %s mask command\n", argv[0]);
+-    exit(1);
+-  }
+-
+-  if (trace(atoi(argv[1])) < 0) {
+-    fprintf(2, "%s: trace failed\n", argv[0]);
+-    exit(1);
+-  }
+-
+-  for(i = 2; i < argc && i < MAXARG; i++){
+-    nargv[i-2] = argv[i];
+-  }
+-  nargv[i-2] = 0;
+-
+-  exec(nargv[0], nargv);
+-  printf("exec %s failed\n", nargv[0]);
+-  exit(1);
+-}
+\ No newline at end of file
+diff --git a/user/user.h b/user/user.h
+index bd3b7f0..f16fe27 100644
+--- a/user/user.h
++++ b/user/user.h
+@@ -22,7 +22,6 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
+-int trace(int);
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff --git a/user/usys.pl b/user/usys.pl
+index 9c97b05..01e426e 100755
+--- a/user/usys.pl
++++ b/user/usys.pl
+@@ -36,4 +36,3 @@ entry("getpid");
+ entry("sbrk");
+ entry("sleep");
+ entry("uptime");
+-entry("trace");
+-- 
+2.43.0
+
+
+From 77063eda92c54d0ba5ff335a9d361b7bba6e8ab1 Mon Sep 17 00:00:00 2001
+From: thanhan0404 <thanhan0404@gmail.com>
+Date: Sat, 21 Mar 2026 18:43:41 +0700
+Subject: [PATCH 7/7] sua lai bai tree
+
+---
+ Makefile | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/Makefile b/Makefile
+index db18b8d..7588f90 100644
+--- a/Makefile
++++ b/Makefile
+@@ -195,6 +195,7 @@ UPROGS=\
+ 	$U/_wc\
+ 	$U/_zombie\
+ 	$U/_xargs\
++	$U/_tree\
+ 
+ 
+ 
+-- 
+2.43.0
+
