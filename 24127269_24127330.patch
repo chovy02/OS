@@ -1,0 +1,143 @@
+From abd3c6f2ef35878eda484517324441344ba4908e Mon Sep 17 00:00:00 2001
+From: thanhan0404 <thanhan0404@gmail.com>
+Date: Sun, 19 Apr 2026 16:11:33 +0700
+Subject: [PATCH] large file
+
+---
+ kernel/file.h |  2 +-
+ kernel/fs.c   | 65 ++++++++++++++++++++++++++++++++++++++++++++++++---
+ kernel/fs.h   |  7 +++---
+ 3 files changed, 67 insertions(+), 7 deletions(-)
+
+diff --git a/kernel/file.h b/kernel/file.h
+index b076d1d..5c4eb3a 100644
+--- a/kernel/file.h
++++ b/kernel/file.h
+@@ -26,7 +26,7 @@ struct inode {
+   short minor;
+   short nlink;
+   uint size;
+-  uint addrs[NDIRECT+1];
++  uint addrs[NDIRECT+2];
+ };
+ 
+ // map major device number to device functions.
+diff --git a/kernel/fs.c b/kernel/fs.c
+index c6bab15..8e0c582 100644
+--- a/kernel/fs.c
++++ b/kernel/fs.c
+@@ -416,6 +416,45 @@ bmap(struct inode *ip, uint bn)
+     brelse(bp);
+     return addr;
+   }
++  bn -= NINDIRECT;
++
++  if(bn < NDOUBLY_INDIRECT){
++    if((addr = ip->addrs[NDIRECT+1]) == 0){
++      addr = balloc(ip->dev);
++      if(addr == 0) return 0;
++      ip->addrs[NDIRECT+1] = addr;
++    }
++    bp = bread(ip->dev, addr);
++    a = (uint*)bp->data;
++
++    uint indirect_idx = bn / NINDIRECT;
++    uint direct_idx = bn % NINDIRECT;
++
++    if((addr = a[indirect_idx]) == 0){
++      addr = balloc(ip->dev);
++      if(addr){
++        a[indirect_idx] = addr;
++        log_write(bp);
++      } else {
++        brelse(bp);
++        return 0;
++      }
++    }
++    brelse(bp);
++
++    bp = bread(ip->dev, addr);
++    a = (uint*)bp->data;
++
++    if((addr = a[direct_idx]) == 0){
++      addr = balloc(ip->dev);
++      if(addr){
++        a[direct_idx] = addr;
++        log_write(bp);
++      }
++    }
++    brelse(bp);
++    return addr;
++  }
+ 
+   panic("bmap: out of range");
+ }
+@@ -425,9 +464,9 @@ bmap(struct inode *ip, uint bn)
+ void
+ itrunc(struct inode *ip)
+ {
+-  int i, j;
+-  struct buf *bp;
+-  uint *a;
++  int i, j, k;
++  struct buf *bp, *bp2;
++  uint *a, *a2;
+ 
+   for(i = 0; i < NDIRECT; i++){
+     if(ip->addrs[i]){
+@@ -448,6 +487,26 @@ itrunc(struct inode *ip)
+     ip->addrs[NDIRECT] = 0;
+   }
+ 
++if(ip->addrs[NDIRECT+1]){
++    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
++    a = (uint*)bp->data;
++    for(j = 0; j < NINDIRECT; j++){
++      if(a[j]){
++        bp2 = bread(ip->dev, a[j]);
++        a2 = (uint*)bp2->data;
++        for(k = 0; k < NINDIRECT; k++){
++          if(a2[k])
++            bfree(ip->dev, a2[k]);
++        }
++        brelse(bp2);
++        bfree(ip->dev, a[j]);
++      }
++    }
++    brelse(bp);
++    bfree(ip->dev, ip->addrs[NDIRECT+1]);
++    ip->addrs[NDIRECT+1] = 0;
++  }
++
+   ip->size = 0;
+   iupdate(ip);
+ }
+diff --git a/kernel/fs.h b/kernel/fs.h
+index 139dcc9..26da311 100644
+--- a/kernel/fs.h
++++ b/kernel/fs.h
+@@ -24,9 +24,10 @@ struct superblock {
+ 
+ #define FSMAGIC 0x10203040
+ 
+-#define NDIRECT 12
++#define NDIRECT 11
+ #define NINDIRECT (BSIZE / sizeof(uint))
+-#define MAXFILE (NDIRECT + NINDIRECT)
++#define NDOUBLY_INDIRECT (NINDIRECT * NINDIRECT)
++#define MAXFILE (NDIRECT + NINDIRECT + NDOUBLY_INDIRECT)
+ 
+ // On-disk inode structure
+ struct dinode {
+@@ -35,7 +36,7 @@ struct dinode {
+   short minor;          // Minor device number (T_DEVICE only)
+   short nlink;          // Number of links to inode in file system
+   uint size;            // Size of file (bytes)
+-  uint addrs[NDIRECT+1];   // Data block addresses
++  uint addrs[NDIRECT+2];   // Data block addresses
+ };
+ 
+ // Inodes per block.
+-- 
+2.43.0
+
