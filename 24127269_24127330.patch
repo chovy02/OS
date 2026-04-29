@@ -1,0 +1,172 @@
+From 9a570a0e398eb228c8acfd742bab5da3f5969e08 Mon Sep 17 00:00:00 2001
+From: chovy02 <luonggiabao0202@gmail.com>
+Date: Mon, 13 Apr 2026 00:48:12 +0700
+Subject: [PATCH 1/2] 4.1.1
+
+---
+ kernel/proc.c | 25 +++++++++++++++++++++++++
+ kernel/proc.h |  2 ++
+ 2 files changed, 27 insertions(+)
+
+diff --git a/kernel/proc.c b/kernel/proc.c
+index 130d9ce..390b124 100644
+--- a/kernel/proc.c
++++ b/kernel/proc.c
+@@ -132,6 +132,15 @@ found:
+     return 0;
+   }
+ 
++  // Allocate a page table for usyscall
++  if((p->usyscall = (struct usyscall *)kalloc()) == 0){
++    freeproc(p);
++    release(&p->lock);
++    return 0;
++  }
++
++  p->usyscall->pid = p->pid;
++
+   // An empty user page table.
+   p->pagetable = proc_pagetable(p);
+   if(p->pagetable == 0){
+@@ -158,6 +167,11 @@ freeproc(struct proc *p)
+   if(p->trapframe)
+     kfree((void*)p->trapframe);
+   p->trapframe = 0;
++
++  if(p->usyscall)
++    kfree((void*)p->usyscall);
++  p->usyscall = 0;
++  
+   if(p->pagetable)
+     proc_freepagetable(p->pagetable, p->sz);
+   p->pagetable = 0;
+@@ -202,6 +216,16 @@ proc_pagetable(struct proc *p)
+     return 0;
+   }
+ 
++  // map the usyscall page just below the trapframe
++  // this page is shared between kernel and user, user can only read (PTE_R | PTE_U)
++  if(mappages(pagetable, USYSCALL, PGSIZE,
++              (uint64)(p->usyscall), PTE_R | PTE_U) < 0){
++    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
++    uvmunmap(pagetable, TRAPFRAME, 1, 0);
++    uvmfree(pagetable, 0);
++    return 0;
++  }
++
+   return pagetable;
+ }
+ 
+@@ -212,6 +236,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
+ {
+   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+   uvmunmap(pagetable, TRAPFRAME, 1, 0);
++  uvmunmap(pagetable, USYSCALL, 1, 0);
+   uvmfree(pagetable, sz);
+ }
+ 
+diff --git a/kernel/proc.h b/kernel/proc.h
+index d021857..c96551d 100644
+--- a/kernel/proc.h
++++ b/kernel/proc.h
+@@ -104,4 +104,6 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++
++  struct usyscall *usyscall;
+ };
+-- 
+2.43.0
+
+
+From d9bfc91f7854ab542da0a0f02bd61bf6766c2a10 Mon Sep 17 00:00:00 2001
+From: chovy02 <luonggiabao0202@gmail.com>
+Date: Thu, 16 Apr 2026 17:43:21 +0700
+Subject: [PATCH 2/2] 4.1.2
+
+---
+ kernel/defs.h |  1 +
+ kernel/exec.c |  4 ++++
+ kernel/vm.c   | 33 +++++++++++++++++++++++++++------
+ 3 files changed, 32 insertions(+), 6 deletions(-)
+
+diff --git a/kernel/defs.h b/kernel/defs.h
+index d133cd3..e2cecda 100644
+--- a/kernel/defs.h
++++ b/kernel/defs.h
+@@ -181,6 +181,7 @@ uint64          walkaddr(pagetable_t, uint64);
+ int             copyout(pagetable_t, uint64, char *, uint64);
+ int             copyin(pagetable_t, char *, uint64, uint64);
+ int             copyinstr(pagetable_t, char *, uint64, uint64);
++void            vmprint(pagetable_t);
+ #if defined(LAB_PGTBL) || defined(SOL_MMAP)
+ void            vmprint(pagetable_t);
+ #endif
+diff --git a/kernel/exec.c b/kernel/exec.c
+index 6d7c452..819ae61 100644
+--- a/kernel/exec.c
++++ b/kernel/exec.c
+@@ -128,6 +128,10 @@ exec(char *path, char **argv)
+   p->trapframe->sp = sp; // initial stack pointer
+   proc_freepagetable(oldpagetable, oldsz);
+ 
++  if(p->pid == 1){
++    vmprint(p->pagetable);
++  }
++
+   return argc; // this ends up in a0, the first argument to main(argc, argv)
+ 
+  bad:
+diff --git a/kernel/vm.c b/kernel/vm.c
+index 7f388fe..e8a2a86 100644
+--- a/kernel/vm.c
++++ b/kernel/vm.c
+@@ -488,17 +488,38 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
+ 
+ 
+ #ifdef LAB_PGTBL
+-void
+-vmprint(pagetable_t pagetable) {
+-  // your code here
++pte_t*
++pgpte(pagetable_t pagetable, uint64 va) {
++  return walk(pagetable, va, 0);
+ }
+ #endif
+ 
++void
++vmprint_walk(pagetable_t pagetable, int level)
++{
++  for(int i = 0; i < 512; i++){
++    pte_t pte = pagetable[i];
++
++    if(pte & PTE_V){
++      if (level == 1) printf("..");
++      else if (level == 2) printf(".. ..");
++      else if (level == 3) printf(".. .. ..");
++
++      uint64 pa = PTE2PA(pte);
+ 
++      printf("%d: pte %p pa %p \n", i, (void*)pte, (void*)pa);
++
++      if((pte & (PTE_R | PTE_W | PTE_X)) == 0){
++        vmprint_walk((pagetable_t)pa, level + 1);
++      }
++    }
++  }
++}
+ 
+ #ifdef LAB_PGTBL
+-pte_t*
+-pgpte(pagetable_t pagetable, uint64 va) {
+-  return walk(pagetable, va, 0);
++void
++vmprint(pagetable_t pagetable) {
++  printf("page table %p\n", (void*)pagetable);
++  vmprint_walk(pagetable, 1);
+ }
+ #endif
+-- 
+2.43.0
+
